@@ -1,0 +1,163 @@
+version: "3"
+
+services:
+  namenode:
+    image: luva/hadoop-namenode:2.0.0-hadoop2.7.4-java8-1
+    networks:
+      - bigdata
+    container_name: namenode
+    ports:
+      - "9001:9001"
+      - "50070:50070"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=luva
+    env_file:
+      - ./hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
+    networks:
+      - bigdata
+    container_name: datanode
+    ports:
+      - "50010:50010"
+      - "50020:50020"
+      - "50075:50075"
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:50070"
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - "namenode"
+  
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop2.7.4-java8
+    networks:
+      - bigdata
+    container_name: resourcemanager
+    ports:
+      - "8088:8088"
+      - "8032:8032"
+    environment:
+      SERVICE_PRECONDITION: "namenode:50070 datanode:50075"
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - "namenode"
+      - "datanode"
+
+  nodemanager1:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop2.7.4-java8
+    networks:
+      - bigdata
+    container_name: nodemanager
+    ports:
+      - "8042:8042"
+    environment:
+      SERVICE_PRECONDITION: "namenode:50070 datanode:50075 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - "namenode"
+      - "datanode"
+      - "resourcemanager"
+  
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop2.7.4-java8
+    networks:
+      - bigdata
+    container_name: historyserver
+    environment:
+      SERVICE_PRECONDITION: "namenode:50070 datanode:50075 resourcemanager:8088"
+    ports:
+      - "8188:8188"
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - "namenode"
+      - "datanode"
+      - "resourcemanager"
+
+  mysql:
+    image: mysql:5.7
+    networks:
+      - bigdata
+    hostname: mysql
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    command: --init-file /data/application/init.sql
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/data/application/init.sql
+    environment:
+      MYSQL_ROOT_USER: root
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_USER: root
+      MYSQL_PASSWORD: 123456
+
+  hive-metastore:
+    # image: luva/hive:2.3.7-mysql
+    image: luva/hive-with-ranger:2.3.7-mysql-2
+    networks:
+      - bigdata
+    container_name: hive-metastore
+    env_file:
+      - ./hadoop.env
+    command: /opt/hive/bin/hive --service metastore
+    environment:
+      SERVICE_PRECONDITION: "namenode:50070 datanode:50075 mysql:3306"
+    ports:
+      - "9083:9083"
+    depends_on:
+      - "mysql"
+      - "namenode"
+      - "datanode"
+
+  hiveserver2:
+    # image: luva/hive:2.3.7-mysql
+    image: luva/hive-with-ranger:2.3.7-mysql-2
+    networks:
+      - bigdata
+    container_name: hiveserver2
+    env_file:
+      - ./hadoop.env
+    environment:
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:mysql://mysql:3306/metastore"
+      SERVICE_PRECONDITION: "hive-metastore:9083"
+    ports:
+      - "10000:10000"
+    depends_on:
+      - "hive-metastore"
+
+  hue:
+    image: gethue/hue:latest
+    networks:
+      - bigdata
+    hostname: hue
+    container_name: hue
+#      dns: 8.8.8.8
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./hue.ini:/usr/share/hue/desktop/conf/z-hue.ini
+    depends_on:
+      - "mysql"
+  
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+  mysql_data:
+
+
+networks:
+  bigdata:
+    external:
+      name: bigdata
